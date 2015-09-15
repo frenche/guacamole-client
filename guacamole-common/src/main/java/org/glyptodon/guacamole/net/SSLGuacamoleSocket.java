@@ -41,6 +41,17 @@ import org.glyptodon.guacamole.io.WriterGuacamoleWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.security.SecureRandom;
+//import java.security.Provider;
+//import java.security.Security;
+
+import org.bouncycastle.crypto.tls.CipherSuite;
+import org.bouncycastle.crypto.tls.TlsClientProtocol;
+import org.bouncycastle.crypto.tls.BasicTlsPSKIdentity;
+import org.bouncycastle.crypto.tls.PSKTlsClient;
+import org.bouncycastle.util.Arrays;
+//import org.bouncycastle.jce.provider.BouncyCastleProvider;
+
 /**
  * Provides abstract socket-like access to a Guacamole connection over SSL to
  * a given hostname and port.
@@ -75,6 +86,23 @@ public class SSLGuacamoleSocket implements GuacamoleSocket {
      * by this class should affect.
      */
     private Socket sock;
+
+    /**
+     * Guacamole TLS-PSK
+     */
+    static class GuacamolePSKTlsClient extends PSKTlsClient {
+
+        public GuacamolePSKTlsClient(String id, byte[] psk) {
+            super(new BasicTlsPSKIdentity(id, psk));
+        }
+
+        public int[] getCipherSuites() {
+            /* Add PSK-only ciphers as they are disabled by default */
+            int[] pskOnly = { CipherSuite.TLS_PSK_WITH_AES_256_CBC_SHA,
+                              CipherSuite.TLS_PSK_WITH_AES_128_CBC_SHA };
+            return Arrays.concatenate(super.getCipherSuites(), pskOnly);
+        }
+    }
 
     /**
      * Creates a new SSLGuacamoleSocket which reads and writes instructions
@@ -112,6 +140,49 @@ public class SSLGuacamoleSocket implements GuacamoleSocket {
             // On successful connect, retrieve I/O streams
             reader = new ReaderGuacamoleReader(new InputStreamReader(sock.getInputStream(),   "UTF-8"));
             writer = new WriterGuacamoleWriter(new OutputStreamWriter(sock.getOutputStream(), "UTF-8"));
+
+        }
+        catch (IOException e) {
+            throw new GuacamoleServerException(e);
+        }
+
+    }
+
+    /**
+     * Creates a new SSLGuacamoleSocket with TLS-PSK authentication
+     *
+     * @param hostname The hostname of the Guacamole proxy server to connect to.
+     * @param port The port of the Guacamole proxy server to connect to.
+     * @param pskId The port of the Guacamole proxy server to connect to.
+     * @param psk The port of the Guacamole proxy server to connect to.
+     * @throws GuacamoleException If an error occurs while connecting to guacd.
+     */
+    public SSLGuacamoleSocket(String hostname, int port, String pskId, byte[] psk)
+                              throws GuacamoleException {
+
+        try {
+
+            logger.debug("Connecting to guacd at {}:{} via SSL/TLS (with TLS-PSK).",
+                    hostname, port);
+
+            // Get address and socket
+            sock = new Socket(InetAddress.getByName(hostname), port);
+
+            // Initialize TLS-PSK
+            //Security.addProvider(new BouncyCastleProvider());
+            GuacamolePSKTlsClient client = new GuacamolePSKTlsClient(pskId, psk);
+
+            TlsClientProtocol protocol = new TlsClientProtocol(sock.getInputStream(),
+                                                               sock.getOutputStream(),
+                                                               new SecureRandom());
+            protocol.connect(client); // what about connect timeout?
+
+            // Set read timeout
+            sock.setSoTimeout(SOCKET_TIMEOUT);
+
+            // On successful connect, retrieve I/O streams
+            reader = new ReaderGuacamoleReader(new InputStreamReader(protocol.getInputStream(),   "UTF-8"));
+            writer = new WriterGuacamoleWriter(new OutputStreamWriter(protocol.getOutputStream(), "UTF-8"));
 
         }
         catch (IOException e) {

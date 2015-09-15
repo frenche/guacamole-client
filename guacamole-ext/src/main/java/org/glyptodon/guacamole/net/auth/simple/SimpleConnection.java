@@ -123,7 +123,8 @@ public class SimpleConnection extends AbstractConnection {
         // If guacd requires SSL, use it
         if (env.getProperty(Environment.GUACD_SSL, false))
             socket = new ConfiguredGuacamoleSocket(
-                new SSLGuacamoleSocket(hostname, port),
+                new SSLGuacamoleSocket(hostname, port,
+                "frenche", "qwertyuiopasdfghjklz".getBytes()), // POC test
                 config, info
             );
 
